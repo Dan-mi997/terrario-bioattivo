@@ -300,3 +300,54 @@ footer {
   font-size: 0.8rem;
   color: var(--text-muted);
 }
+
+/* ============================================================
+   TAVOLE FOTOGRAFICHE & FIGURE (STILE TACQUINO)
+   ============================================================ */
+.field-figure {
+  margin: 1.5rem 0;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-subtle);
+}
+
+.field-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 380px;
+  object-fit: cover;
+  /* Armonizza le immagini luminose con il tema scuro */
+  filter: brightness(0.92) contrast(1.05);
+  transition: filter 0.3s ease, transform 0.3s ease;
+}
+
+/* Leggero tocco interattivo al tap o hover */
+@media (hover: hover) {
+  .field-figure:hover img {
+    filter: brightness(1) contrast(1);
+    transform: scale(1.01);
+  }
+}
+
+/* Didascalia stile appunto scientifico */
+.field-caption {
+  padding: 0.75rem 1rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border-subtle);
+  background-color: rgba(0, 0, 0, 0.2);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.field-caption span.fig-id {
+  color: var(--accent-amber);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.72rem;
+}
