@@ -351,3 +351,67 @@ footer {
   letter-spacing: 0.05em;
   font-size: 0.72rem;
 }
+
+/* ============================================================
+   WIDGET AUDIO AMBIENTALE (SCHEDA SPECIE)
+   ============================================================ */
+.audio-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.9rem 1.1rem;
+  margin: 1.25rem 0 1.75rem 0;
+  box-shadow: var(--shadow-subtle);
+}
+
+.audio-card-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.audio-icon {
+  font-size: 1.3rem;
+}
+
+.audio-text h4 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.15rem;
+}
+
+.audio-text p {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.audio-play-btn {
+  background-color: rgba(90, 138, 100, 0.15);
+  border: 1px solid var(--accent-moss);
+  color: var(--accent-moss);
+  border-radius: 999px;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+.audio-play-btn:active {
+  transform: scale(0.96);
+}
+
+.audio-play-btn.is-playing {
+  background-color: rgba(212, 152, 66, 0.15);
+  border-color: var(--accent-amber);
+  color: var(--accent-amber);
+}
