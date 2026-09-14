@@ -20,6 +20,25 @@
       <p class="subtitle">Predatori notturni discreti, custodi silenziosi di anfratti e fessure rocciose.</p>
     </header>
 
+    <!-- Modulo Audio Pianoforte Biotopo -->
+    <div class="audio-card">
+      <div class="audio-card-info">
+        <span class="audio-icon" id="audio-icon-display">🎹</span>
+        <div class="audio-text">
+          <h4>Figli delle Chele</h4>
+          <p>Traccia pianoforte per il biotopo</p>
+        </div>
+      </div>
+      <button id="species-audio-btn" class="audio-play-btn" type="button">
+        <span id="btn-icon">▶</span>
+        <span id="btn-text">Ascolta</span>
+      </button>
+      <audio id="species-audio-player" loop preload="auto">
+        <source src="audio/Figli%20delle%20chele%20pianoforte.mp4" type="audio/mp4">
+        <source src="audio/Figli delle chele pianoforte.mp4">
+      </audio>
+    </div>
+
     <main>
       <section>
         <h2>Profilo della Specie</h2>
@@ -76,5 +95,56 @@
   </div>
 
   <script src="js/main.js"></script>
+  <script>
+    const audioTrack = document.getElementById("species-audio-player");
+    const audioBtn = document.getElementById("species-audio-btn");
+    const audioBtnIcon = document.getElementById("btn-icon");
+    const audioBtnText = document.getElementById("btn-text");
+
+    function setPlayingUI() {
+      if (audioBtn) audioBtn.classList.add("is-playing");
+      if (audioBtnIcon) audioBtnIcon.textContent = "⏸";
+      if (audioBtnText) audioBtnText.textContent = "Pausa";
+    }
+
+    function setPausedUI() {
+      if (audioBtn) audioBtn.classList.remove("is-playing");
+      if (audioBtnIcon) audioBtnIcon.textContent = "▶";
+      if (audioBtnText) audioBtnText.textContent = "Ascolta";
+    }
+
+    // Controllo manuale tramite pulsante Play/Pausa
+    if (audioBtn && audioTrack) {
+      audioBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (audioTrack.paused) {
+          audioTrack.play().then(setPlayingUI).catch(err => console.warn(err));
+        } else {
+          audioTrack.pause();
+          setPausedUI();
+        }
+      });
+    }
+
+    // Avvio automatico al primo tocco o scroll sullo schermo
+    function triggerOnFirstUserInteraction() {
+      if (audioTrack && audioTrack.paused) {
+        audioTrack.play()
+          .then(() => {
+            setPlayingUI();
+          })
+          .catch((err) => {
+            console.log("In attesa di interazione diretta:", err);
+          });
+      }
+      window.removeEventListener("touchstart", triggerOnFirstUserInteraction);
+      window.removeEventListener("click", triggerOnFirstUserInteraction);
+      window.removeEventListener("scroll", triggerOnFirstUserInteraction);
+    }
+
+    window.addEventListener("touchstart", triggerOnFirstUserInteraction, { passive: true, once: true });
+    window.addEventListener("click", triggerOnFirstUserInteraction, { once: true });
+    window.addEventListener("scroll", triggerOnFirstUserInteraction, { passive: true, once: true });
+  </script>
 </body>
 </html>
