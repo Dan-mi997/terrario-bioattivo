@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Terrario Bioattivo • Guida di Spedizione</title>
+  <title>Figli delle Chele • Terrario Bioattivo</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -11,25 +11,31 @@
   <div class="container">
     <header>
       <span class="badge-tag">Progetto Terrario • Dossier di Campo</span>
-      <h1>Microcosmo Bioattivo</h1>
-      <p class="subtitle">Guida all'ecosistema in miniatura, ai suoi abitanti notturni e agli appunti di spedizione.</p>
+      <h1>Figli delle Chele</h1>
+      <p class="subtitle">Guida all'ecosistema in miniatura e ai suoi abitanti notturni.</p>
     </header>
 
+    <!-- Griglia parametri contestualizzati -->
     <div class="status-pill-grid">
       <div class="status-pill">
-        <span class="status-label">Bioma</span>
-        <span class="status-val">Sottobosco / Roccia</span>
+        <span class="status-label">Specie Ospite</span>
+        <span class="status-val">Euscorpius italicus</span>
       </div>
       <div class="status-pill">
-        <span class="status-label">Equilibrio</span>
-        <span class="status-val">Bioattivo</span>
+        <span class="status-label">Dimensioni Biotopo</span>
+        <span class="status-val">80 × 50 cm</span>
       </div>
-      <div class="status-pill">
-        <span class="status-label">Abitanti</span>
-        <span class="status-val">Euscorpius + Squadra</span>
+      <div class="status-pill" id="cell-phase">
+        <span class="status-label">Fase Circadiana</span>
+        <span class="status-val" id="phase-status">Calcolo in corso...</span>
+      </div>
+      <div class="status-pill" id="cell-transition">
+        <span class="status-label" id="transition-label">Transizione</span>
+        <span class="status-val" id="transition-time">--:--</span>
       </div>
     </div>
 
+    <!-- Schede di navigazione -->
     <main class="nav-menu">
       <a href="scorpioni.html" class="nav-card">
         <div class="nav-card-icon">🦂</div>
@@ -53,7 +59,7 @@
         <div class="nav-card-icon">🪵</div>
         <div class="nav-card-body">
           <h2>Come è Stato Costruito</h2>
-          <p>Drenaggio a falso fondo, stratificazione del substrato, microfessure in ardesia e monitoraggio.</p>
+          <p>Drenaggio a falso fondo, stratificazione del substrato, microfessure in ardesia e rifugi.</p>
         </div>
         <div class="nav-card-arrow">›</div>
       </a>
@@ -69,7 +75,7 @@
     </main>
 
     <footer>
-      <p>Scansiona il QR code per consultare la guida direttamente dal terrario.<br>© Progetto Bioattivo.</p>
+      <p>Scansiona il QR code per consultare la guida direttamente dal terrario.<br>© Figli delle Chele.</p>
     </footer>
   </div>
 
