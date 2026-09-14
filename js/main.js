@@ -1,11 +1,11 @@
 document.addEventListener("DOMContentLoaded", () => {
-  // 1. Feedback immediato al tocco per display touch
+  // 1. Feedback al tocco per display touch
   const interactiveElements = document.querySelectorAll(".nav-card, .back-link");
   interactiveElements.forEach((el) => {
     el.addEventListener("touchstart", () => {}, { passive: true });
   });
 
-  // 2. Calcolo astronomico a 4 fasi (Alba, Giorno, Tramonto, Notte) per Lazzate
+  // 2. Calcolo astronomico a 4 fasi per Lazzate
   calculateCircadianPhaseLazzate();
 });
 
@@ -20,64 +20,63 @@ function calculateCircadianPhaseLazzate() {
   const lon = 9.082;
   const now = new Date();
 
-  // Durata della rampa LED arancione (in minuti)
+  // Durata rampa alba/tramonto (45 min)
   const TRANSITION_DURATION_MIN = 45;
 
   const times = getSunTimes(now, lat, lon);
   const sunrise = times.sunrise;
   const sunset = times.sunset;
 
-  // Intervallo Alba: da sunrise a sunrise + 45 min
+  // Finestra Alba: [sunrise, sunrise + 45 min]
   const sunriseEnd = new Date(sunrise.getTime() + TRANSITION_DURATION_MIN * 60000);
 
-  // Intervallo Tramonto: da sunset - 45 min a sunset
+  // Finestra Tramonto: [sunset - 45 min, sunset]
   const sunsetStart = new Date(sunset.getTime() - TRANSITION_DURATION_MIN * 60000);
 
   const formatHHMM = (d) =>
     d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
 
-  // Determinazione delle 4 fasi
+  // Logica delle 4 fasi ed etichette coerenti
   if (now >= sunrise && now < sunriseEnd) {
-    // 1. FASE ALBA
+    // 1. FASE ALBA -> punta alla fine dell'alba
     phaseEl.innerHTML = "🌅 Alba (Transizione)";
     phaseEl.style.color = "var(--accent-amber)";
-    transLabelEl.textContent = "Fase Diurna alle";
+    transLabelEl.textContent = "Fine Alba";
     transTimeEl.textContent = formatHHMM(sunriseEnd);
     transTimeEl.style.color = "var(--text-primary)";
   } else if (now >= sunriseEnd && now < sunsetStart) {
-    // 2. FASE DIURNA
+    // 2. FASE DIURNA -> punta all'inizio del tramonto
     phaseEl.innerHTML = "☀️ Diurna (Nei rifugi)";
     phaseEl.style.color = "var(--accent-amber)";
-    transLabelEl.textContent = "Tramonto LED alle";
+    transLabelEl.textContent = "Inizio Tramonto";
     transTimeEl.textContent = formatHHMM(sunsetStart);
     transTimeEl.style.color = "var(--accent-amber)";
   } else if (now >= sunsetStart && now < sunset) {
-    // 3. FASE TRAMONTO
+    // 3. FASE TRAMONTO -> punta alla fine del tramonto
     phaseEl.innerHTML = "🌇 Tramonto (Risveglio)";
     phaseEl.style.color = "var(--accent-amber)";
-    transLabelEl.textContent = "Fase Notturna alle";
+    transLabelEl.textContent = "Fine Tramonto";
     transTimeEl.textContent = formatHHMM(sunset);
     transTimeEl.style.color = "#70d6ff";
   } else {
-    // 4. FASE NOTTURNA
+    // 4. FASE NOTTURNA -> punta all'inizio dell'alba successiva
     phaseEl.innerHTML = "🌙 Notturna (Attivi)";
     phaseEl.style.color = "#70d6ff";
 
     let nextSunrise = sunrise;
     if (now >= sunset) {
-      // Se siamo passati dal tramonto odierno, la prossima alba è domani
       const tomorrow = new Date(now);
       tomorrow.setDate(tomorrow.getDate() + 1);
       nextSunrise = getSunTimes(tomorrow, lat, lon).sunrise;
     }
 
-    transLabelEl.textContent = "Alba LED alle";
+    transLabelEl.textContent = "Inizio Alba";
     transTimeEl.textContent = formatHHMM(nextSunrise);
     transTimeEl.style.color = "var(--accent-amber)";
   }
 }
 
-// Algoritmo solare
+// Algoritmo astronomico standard
 function getSunTimes(date, lat, lon) {
   const startOfYear = new Date(date.getFullYear(), 0, 0);
   const diff = date - startOfYear;
