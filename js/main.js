@@ -1,13 +1,25 @@
 document.addEventListener("DOMContentLoaded", () => {
-  // 1. Feedback al tocco per display touch
   const interactiveElements = document.querySelectorAll(".nav-card, .back-link");
   interactiveElements.forEach((el) => {
     el.addEventListener("touchstart", () => {}, { passive: true });
   });
 
-  // 2. Calcolo astronomico a 4 fasi per Lazzate
   calculateCircadianPhaseLazzate();
+  // Ricalcola ogni minuto per mantenere aggiornata la fase
+  setInterval(calculateCircadianPhaseLazzate, 60000);
 });
+
+// Coordinate Lazzate (uniformate)
+const LATITUDE = 45.6722;
+const LONGITUDE = 9.0833;
+
+// Offset di transizione in minuti rispetto all'evento solare astronomico
+// Alba: 60 min centrati (-30 min / +30 min)
+// Tramonto: 60 min (-45 min / +15 min)
+const DAWN_START_OFFSET = -30;
+const DAWN_END_OFFSET   = +30;
+const DUSK_START_OFFSET = -45;
+const DUSK_END_OFFSET   = +15;
 
 function calculateCircadianPhaseLazzate() {
   const phaseEl = document.getElementById("phase-status");
@@ -16,102 +28,121 @@ function calculateCircadianPhaseLazzate() {
 
   if (!phaseEl || !transLabelEl || !transTimeEl) return;
 
-  const lat = 45.672; // Lazzate (MB)
-  const lon = 9.082;
   const now = new Date();
 
-  // Durata rampa alba/tramonto (45 min)
-  const TRANSITION_DURATION_MIN = 45;
+  // Calcolo alba e tramonto astronomici di oggi con algoritmo NOAA
+  const srToday = calculateNoaaSunEvent(now, LATITUDE, LONGITUDE, true);
+  const ssToday = calculateNoaaSunEvent(now, LATITUDE, LONGITUDE, false);
 
-  const times = getSunTimes(now, lat, lon);
-  const sunrise = times.sunrise;
-  const sunset = times.sunset;
-
-  // Finestra Alba: [sunrise, sunrise + 45 min]
-  const sunriseEnd = new Date(sunrise.getTime() + TRANSITION_DURATION_MIN * 60000);
-
-  // Finestra Tramonto: [sunset - 45 min, sunset]
-  const sunsetStart = new Date(sunset.getTime() - TRANSITION_DURATION_MIN * 60000);
+  // Finestre temporali effettive identiche all'ESP32
+  const dawnStart = new Date(srToday.getTime() + DAWN_START_OFFSET * 60000);
+  const dawnEnd   = new Date(srToday.getTime() + DAWN_END_OFFSET * 60000);
+  const duskStart = new Date(ssToday.getTime() + DUSK_START_OFFSET * 60000);
+  const duskEnd   = new Date(ssToday.getTime() + DUSK_END_OFFSET * 60000);
 
   const formatHHMM = (d) =>
     d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
 
-  // Logica delle 4 fasi ed etichette coerenti
-  if (now >= sunrise && now < sunriseEnd) {
-    // 1. FASE ALBA -> punta alla fine dell'alba
+  // 1. FASE ALBA
+  if (now >= dawnStart && now < dawnEnd) {
     phaseEl.innerHTML = "🌅 Alba (Transizione)";
     phaseEl.style.color = "var(--accent-amber)";
     transLabelEl.textContent = "Fine Alba";
-    transTimeEl.textContent = formatHHMM(sunriseEnd);
+    transTimeEl.textContent = formatHHMM(dawnEnd);
     transTimeEl.style.color = "var(--text-primary)";
-  } else if (now >= sunriseEnd && now < sunsetStart) {
-    // 2. FASE DIURNA -> punta all'inizio del tramonto
+  } 
+  // 2. FASE DIURNA
+  else if (now >= dawnEnd && now < duskStart) {
     phaseEl.innerHTML = "☀️ Diurna (Nei rifugi)";
     phaseEl.style.color = "var(--accent-amber)";
     transLabelEl.textContent = "Inizio Tramonto";
-    transTimeEl.textContent = formatHHMM(sunsetStart);
+    transTimeEl.textContent = formatHHMM(duskStart);
     transTimeEl.style.color = "var(--accent-amber)";
-  } else if (now >= sunsetStart && now < sunset) {
-    // 3. FASE TRAMONTO -> punta alla fine del tramonto
+  } 
+  // 3. FASE TRAMONTO
+  else if (now >= duskStart && now < duskEnd) {
     phaseEl.innerHTML = "🌇 Tramonto (Risveglio)";
     phaseEl.style.color = "var(--accent-amber)";
     transLabelEl.textContent = "Fine Tramonto";
-    transTimeEl.textContent = formatHHMM(sunset);
+    transTimeEl.textContent = formatHHMM(duskEnd);
     transTimeEl.style.color = "#70d6ff";
-  } else {
-    // 4. FASE NOTTURNA -> punta all'inizio dell'alba successiva
+  } 
+  // 4. FASE NOTTURNA
+  else {
     phaseEl.innerHTML = "🌙 Notturna (Attivi)";
     phaseEl.style.color = "#70d6ff";
 
-    let nextSunrise = sunrise;
-    if (now >= sunset) {
+    let targetDawnStart;
+    if (now >= duskEnd) {
+      // Se siamo dopo il tramonto, la prossima alba è domani
       const tomorrow = new Date(now);
       tomorrow.setDate(tomorrow.getDate() + 1);
-      nextSunrise = getSunTimes(tomorrow, lat, lon).sunrise;
+      const srTomorrow = calculateNoaaSunEvent(tomorrow, LATITUDE, LONGITUDE, true);
+      targetDawnStart = new Date(srTomorrow.getTime() + DAWN_START_OFFSET * 60000);
+    } else {
+      // Se siamo tra mezzanotte e l'inizio dell'alba di oggi
+      targetDawnStart = dawnStart;
     }
 
     transLabelEl.textContent = "Inizio Alba";
-    transTimeEl.textContent = formatHHMM(nextSunrise);
+    transTimeEl.textContent = formatHHMM(targetDawnStart);
     transTimeEl.style.color = "var(--accent-amber)";
   }
 }
 
-// Algoritmo astronomico standard
-function getSunTimes(date, lat, lon) {
-  const startOfYear = new Date(date.getFullYear(), 0, 0);
-  const diff = date - startOfYear;
-  const dayOfYear = Math.floor(diff / (1000 * 60 * 60 * 24));
+// Algoritmo astronomico NOAA (trasposizione esatta della funzione C++)
+function calculateNoaaSunEvent(date, lat, lon, isSunrise) {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
 
-  const declination =
-    23.45 * Math.sin(((360 / 365) * (dayOfYear - 81) * Math.PI) / 180);
+  // Fuso orario locale in ore (gestisce in automatico ora legale/solare del browser)
+  const tzOffsetHours = -date.getTimezoneOffset() / 60;
 
-  const b = ((360 / 365) * (dayOfYear - 81) * Math.PI) / 180;
-  const eot =
-    9.87 * Math.sin(2 * b) - 7.53 * Math.cos(b) - 1.5 * Math.sin(b);
+  const N1 = Math.floor((275 * month) / 9);
+  const N2 = Math.floor((month + 9) / 12);
+  const N3 = 1 + Math.floor((year - 4 * Math.floor(year / 4) + 2) / 3);
+  const N = N1 - N2 * N3 + day - 30;
 
-  const rad = Math.PI / 180;
-  const latRad = lat * rad;
-  const decRad = declination * rad;
+  const lngHour = lon / 15.0;
+  const t = isSunrise ? N + (6.0 - lngHour) / 24.0 : N + (18.0 - lngHour) / 24.0;
+
+  const M = 0.9856 * t - 3.289;
+
+  let L = M + 1.916 * Math.sin((M * Math.PI) / 180.0) + 0.02 * Math.sin((2 * M * Math.PI) / 180.0) + 282.634;
+  L = L % 360.0;
+  if (L < 0) L += 360.0;
+
+  let RA = (Math.atan(0.91764 * Math.tan((L * Math.PI) / 180.0)) * 180.0) / Math.PI;
+  RA = RA % 360.0;
+  if (RA < 0) RA += 360.0;
+
+  const Lquadrant = Math.floor(L / 90.0) * 90.0;
+  const RAquadrant = Math.floor(RA / 90.0) * 90.0;
+  RA = (RA + (Lquadrant - RAquadrant)) / 15.0;
+
+  const sinDec = 0.39782 * Math.sin((L * Math.PI) / 180.0);
+  const cosDec = Math.cos(Math.asin(sinDec));
+
   const cosH =
-    (Math.sin(-0.83 * rad) - Math.sin(latRad) * Math.sin(decRad)) /
-    (Math.cos(latRad) * Math.cos(decRad));
+    (Math.cos((90.833 * Math.PI) / 180.0) - sinDec * Math.sin((lat * Math.PI) / 180.0)) /
+    (cosDec * Math.cos((lat * Math.PI) / 180.0));
 
-  const clampedCosH = Math.max(-1, Math.min(1, cosH));
-  const hourAngle = (Math.acos(clampedCosH) * 180) / Math.PI;
+  if (cosH > 1.0 || cosH < -1.0) return null;
 
-  const solarNoonMinutes = 720 - 4 * lon - eot;
-  const sunriseMinutes = solarNoonMinutes - hourAngle * 4;
-  const sunsetMinutes = solarNoonMinutes + hourAngle * 4;
+  let H = isSunrise ? 360.0 - (Math.acos(cosH) * 180.0) / Math.PI : (Math.acos(cosH) * 180.0) / Math.PI;
+  H = H / 15.0;
 
-  const timezoneOffsetMinutes = -date.getTimezoneOffset();
+  const T = H + RA - 0.06571 * t - 6.622;
+  let UT = (T - lngHour) % 24.0;
+  if (UT < 0) UT += 24.0;
 
-  const sunriseDate = new Date(date);
-  sunriseDate.setHours(0, 0, 0, 0);
-  sunriseDate.setMinutes(sunriseMinutes + timezoneOffsetMinutes);
+  let localT = (UT + tzOffsetHours) % 24.0;
+  if (localT < 0) localT += 24.0;
 
-  const sunsetDate = new Date(date);
-  sunsetDate.setHours(0, 0, 0, 0);
-  sunsetDate.setMinutes(sunsetMinutes + timezoneOffsetMinutes);
-
-  return { sunrise: sunriseDate, sunset: sunsetDate };
+  const totalMinutes = Math.round(localT * 60.0);
+  const eventDate = new Date(date);
+  eventDate.setHours(0, 0, 0, 0);
+  eventDate.setMinutes(totalMinutes);
+  return eventDate;
 }
