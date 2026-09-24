@@ -45,68 +45,74 @@
   </div>
 
   <script src="js/main.js"></script>
-  <!-- Schermata segreta a schermo intero (inizialmente nascosta) -->
+ <!-- Schermata segreta a tutto schermo -->
 <div id="easter-egg" style="
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(10, 20, 15, 0.95);
+  background: rgba(10, 20, 15, 0.96);
   backdrop-filter: blur(8px);
   z-index: 99999;
-  display: none;
   align-items: center;
   justify-content: center;
   flex-direction: column;
   color: #f0fdf4;
   text-align: center;
-  animation: fadeIn 0.4s ease-out;
+  padding: 20px;
 ">
-  <div style="font-size: 4rem; margin-bottom: 10px;">🦂 🌿</div>
-  <h1 style="font-size: clamp(2.5rem, 8vw, 5rem); color: #4ade80; text-transform: uppercase; letter-spacing: 4px; margin: 0;">
+  <div style="font-size: 3.5rem; margin-bottom: 12px;">🦂 🌿</div>
+  <h1 style="font-size: clamp(2.2rem, 9vw, 4.5rem); color: #4ade80; text-transform: uppercase; letter-spacing: 3px; margin: 0; line-height: 1.1;">
     Grazie Asia
   </h1>
-  <p style="font-size: 1.2rem; color: #a7f3d0; margin-top: 15px; font-family: monospace;">
-    [ Livello segreto sbloccato • Ispettore di Campo ]
+  <p style="font-size: 1rem; color: #a7f3d0; margin-top: 16px; font-family: monospace;">
+    [ Livello segreto sbloccato • Note di Campo ]
   </p>
   <button onclick="document.getElementById('easter-egg').style.display='none'" style="
-    margin-top: 30px;
+    margin-top: 32px;
     background: #1b382b;
     border: 1px solid #4ade80;
     color: #4ade80;
-    padding: 10px 24px;
-    border-radius: 20px;
+    padding: 12px 28px;
+    border-radius: 24px;
     cursor: pointer;
-    font-size: 0.95rem;
+    font-size: 1rem;
+    font-weight: bold;
   ">Chiudi</button>
 </div>
 
 <script>
   const easterEgg = document.getElementById("easter-egg");
 
-  function attivaEasterEgg() {
-    if (easterEgg.style.display !== "flex") {
-      easterEgg.style.display = "flex";
-      console.log("%c GRAZIE ASIA 🦂🌿 ", "background: #1b382b; color: #4ade80; font-size: 32px; font-weight: bold; padding: 15px; border-radius: 8px;");
-    }
+  function mostraSorpresa() {
+    easterEgg.style.display = "flex";
   }
 
-  // 1. Intercetta la pressione di F12 o Ctrl+Shift+I / Cmd+Option+I
-  window.addEventListener("keydown", (e) => {
-    if (
-      e.key === "F12" ||
-      ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "I" || e.key === "i" || e.key === "C" || e.key === "c"))
-    ) {
-      attivaEasterEgg();
+  // 1. MODALITÀ CELLULARE: 3 tocchi rapidi sul titolo "Ringraziamenti"
+  const titolo = document.querySelector("h1");
+  let tapCount = 0;
+  let tapTimer = null;
+
+  titolo.addEventListener("click", () => {
+    tapCount++;
+    clearTimeout(tapTimer);
+
+    if (tapCount === 3) {
+      mostraSorpresa();
+      tapCount = 0;
+    } else {
+      tapTimer = setTimeout(() => {
+        tapCount = 0;
+      }, 500); // Finestra di mezzo secondo tra un tocco e l'altro
     }
   });
 
-  // 2. Rileva l'apertura della dock laterale/inferiore dei DevTools (variazione di viewport)
-  const threshold = 160;
-  window.addEventListener("resize", () => {
-    const widthDiff = window.outerWidth - window.innerWidth > threshold;
-    const heightDiff = window.outerHeight - window.innerHeight > threshold;
-    if (widthDiff || heightDiff) {
-      attivaEasterEgg();
+  // 2. MODALITÀ DESKTOP: tasto F12 o scorciatoie DevTools
+  window.addEventListener("keydown", (e) => {
+    if (
+      e.key === "F12" ||
+      ((e.ctrlKey || e.metaKey) && e.shiftKey && ["I", "i", "C", "c"].includes(e.key))
+    ) {
+      mostraSorpresa();
     }
   });
 </script>
