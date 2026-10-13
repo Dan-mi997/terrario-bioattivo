@@ -1,10 +1,156 @@
+# 🦎 Bioactive Terrarium Controller — Architettura Tecnica & Codice Sorgente
+
+Documentazione ingegneristica, architettura hardware/software, pipeline dati BI e codice sorgente completo per la centralina basata su **ESP32** dedicata alla gestione del terrario bioattivo (*Lazzate, MB*).
+
+---
+
+## Indice
+1. [Mappatura Hardware & Pinout](#1-mappatura-hardware--pinout)
+2. [Scelte Architetturali & Rationale Ingegneristico](#2-scelte-architetturali--rationale-ingegneristico)
+3. [Motore Circadiano Astronomico (Lazzate)](#3-motore-circadiano-astronomico-lazzate)
+4. [Pipeline Telemetria: Firebase RTDB & Power Query (ETL)](#4-pipeline-telemetria-firebase-rtdb--power-query-etl)
+5. [Guida al Flashing & Troubleshooting OTA](#5-guida-al-flashing--troubleshooting-ota)
+6. [Codice Sorgente Completo (`TerrarioController.ino`)](#6-codice-sorgente-completo-terrariocontrollerino)
+
+---
+
+## 1. Mappatura Hardware & Pinout
+
+Il sistema utilizza un modulo **ESP32 Dev Module** configurato con due bus I2C hardware fisicamente separati e un canale digitale ad alta velocità per il pilotaggio della striscia LED indirizzabile SK6812 RGBW (36 LED).
+
+| Periferica | Segnale Logico | Pin ESP32 | Note Tecniche |
+| :--- | :--- | :--- | :--- |
+| **Striscia LED SK6812 RGBW** | `DATA IN` | **GPIO 4 (`D4`)** | Protocollo 800 kHz (`NEO_GRBW`), 36 pixel |
+| **Sensore BME280 — Volta** | `SDA` (Data) | **GPIO 21 (`D21`)** | Bus I2C Hardware 0 (`I2Cone`) — Zona aerea |
+| **Sensore BME280 — Volta** | `SCL` (Clock) | **GPIO 22 (`D22`)** | Bus I2C Hardware 0 (`I2Cone`) — Zona aerea |
+| **Sensore BME280 — Tana** | `SDA` (Data) | **GPIO 18 (`D18`)** | Bus I2C Hardware 1 (`I2Ctwo`) — Zona ipogea |
+| **Sensore BME280 — Tana** | `SCL` (Clock) | **GPIO 19 (`D19`)** | Bus I2C Hardware 1 (`I2Ctwo`) — Zona ipogea |
+
+---
+
+## 2. Scelte Architetturali & Rationale Ingegneristico
+
+### 2.1. Downgrade a ESP32 Arduino Core `2.0.17`
+Il firmware è progettato per essere compilato specificamente con la versione **2.0.17** dell'ESP32 Arduino Core (basata su **ESP-IDF v4.4.7**), evitando le release 3.x (basate su ESP-IDF v5.x).
+* **Stabilità dello Stack Asincrono:** Le librerie `AsyncTCP` ed `ESPAsyncWebServer` fanno affidamento sulle primitive di sincronizzazione FreeRTOS e lwIP di ESP-IDF v4. Nel Core 3.x le modifiche alle firme delle API causano errori di compilazione o crash a runtime (`Guru Meditation Error` / `LoadStoreError`) sotto traffico HTTP concorrente.
+* **Coesistenza RMT e Wi-Fi:** Nel Core 2.0.17 la gestione degli interrupt durante la generazione del segnale a 800 kHz per i LED RGBW convive senza conflitti con il task Wi-Fi su Core 0, garantendo un funzionamento continuo 24/7.
+
+### 2.2. Doppio Bus I2C Fisico (`TwoWire(0)` e `TwoWire(1)`)
+Invece di collegare entrambi i sensori BME280 in parallelo sullo stesso bus cambiando l'indirizzo hardware (`0x76` / `0x77`), vengono istanziati i due controller I2C fisici dell'ESP32 su coppie di pin indipendenti:
+* **Tolleranza ai guasti (Fault Isolation):** Il sensore posto nella *Tana* opera in un ambiente con umidità relativa prossima alla saturazione (>90%). Se la condensa dovesse causare una caduta di tensione o un blocco della linea `SDA/SCL` del bus ipogeo, il bus della *Volta* continuerebbe a funzionare in modo del tutto isolato senza bloccare l'esecuzione del firmware.
+* **Indipendenza dagli indirizzi:** Entrambi i sensori possono mantenere l'indirizzo di fabbrica `0x76` senza conflitti di indirizzamento.
+
+### 2.3. Strategia Anti-Autoriscaldamento (*Anti Self-Heating*)
+I sensori Bosch BME280 soffrono di autoriscaldamento interno se interrogati continuamente (es. una volta al secondo): il passaggio di corrente nel die riscalda il sensore di **+0.5 °C / +1.5 °C**, falsando di conseguenza anche il calcolo dell'umidità relativa (che risulta sottostimata).
+* **Campionamento programmato:** Il firmware mantiene i sensori completamente a riposo e li interroga **solo due volte all'ora, esattamente ai minuti `15` e `45`** (oltre che su eventuale richiesta di test manuale dall'interfaccia web).
+* In questo modo la misura riflette sempre il reale equilibrio termico ed igrometrico del terrario.
+
+### 2.4. Disaccoppiamento Thread-Safe (Web Server vs NeoPixel) & Protezione OTA
+Chiamare `strip.show()` direttamente dentro le callback HTTP di `ESPAsyncWebServer` causa il riavvio dell'ESP32 (Watchdog Reset), poiché `AsyncWebServer` opera in un task background mentre `Adafruit_NeoPixel` disabilita gli interrupt per rispettare le tempistiche sub-microsecondo dei LED.
+* **Pattern Producer-Consumer:** Le rotte HTTP (`/api/bulk`, `/api/dimmer`, `/api/anim`, `/api/auto`) modificano esclusivamente gli array in RAM (`ledBuffer[36][4]`) e alzano il flag `ledsNeedUpdate = true`.
+* **Rendering nel Loop a 50 FPS:** L'invio fisico dei dati sul pin `D4` avviene unicamente nel `loop()` principale su Core 1, limitato a un massimo di 50 frame al secondo (ogni 20 ms).
+* **Dimming non distruttivo in virgola mobile:** `strip.setBrightness()` è fissato a `255` nel `setup()`. La luminosità generale (`masterBrightness`) viene applicata matematicamente in fase di rendering senza alterare i valori RGBW salvati in `ledBuffer`.
+* **Sospensione durante OTA (`isOtaUpdating`):** All'avvio di un caricamento firmware via Wi-Fi (`ArduinoOTA.onStart`), il motore grafico LED viene messo in pausa. Questo impedisce che la disabilitazione degli interrupt di `strip.show()` faccia perdere pacchetti TCP durante il trasferimento dell'immagine binaria.
+
+---
+
+## 3. Motore Circadiano Astronomico (Lazzate)
+
+La centralina integra un algoritmo astronomico autonomo in C++ tarato sulle coordinate geografiche di **Lazzate (Latitudine `45.674° N`, Longitudine `9.082° E`)**:
+
+1. **Calcolo Giornaliero di Alba e Tramonto:** Partendo dal giorno dell'anno (`tm_yday`), il microcontrollore calcola la declinazione solare e l'angolo orario, determinando il minuto esatto di alba (`srMin`) e tramonto (`ssMin`) per la giornata corrente.
+2. **Gestione Automatica Ora Solare / Ora Legale:** Tramite la regola POSIX `CET-1CEST,M3.5.0,M10.5.0/3`, l'ESP32 applica automaticamente l'offset UTC+1 in inverno e UTC+2 in estate.
+3. **Sincronizzazione Oraria Ibrida (NTP + Browser Fallback):** All'avvio l'ESP32 contatta i server NTP (`pool.ntp.org`, `time.google.com`). Qualora la risposta NTP tardasse ad arrivare, la prima apertura della Web App sincronizza istantaneamente l'orologio interno (`settimeofday`) usando il timestamp Unix del dispositivo client.
+4. **Fasi Fotoperiodiche (Modalità Default):**
+   * **Notte (`Ora < Alba - 30m` oppure `Ora >= Tramonto + 30m`):** Spegnimento totale (`R:0, G:0, B:0, W:0`).
+   * **Finestra d'Alba (`da Alba - 30m a Alba + 30m`, 60 min):** Sfumatura progressiva dal buio all'ambra calda (`255, 60, 0, 10`) nei primi 30 minuti, e dall'ambra alla luce diurna nei successivi 30 minuti.
+   * **Giorno (`da Alba + 30m a Tramonto - 30m`):** Spettro diurno bianco pieno bilanciato per la crescita della flora (`R:100, G:120, B:80, W:255`).
+   * **Finestra di Tramonto (`da Tramonto - 30m a Tramonto + 30m`, 60 min):** Transizione inversa dalla luce diurna al rosso/ambra crepuscolare, fino al buio completo.
+5. **Override Manuale e Ripristino Istantaneo:** Qualsiasi azione di disegno o animazione nella Web App sospende il ciclo automatico passando in *Modalità Manuale*. Premendo il pulsante **Ciclo Naturale**, la coda manuale viene cancellata e l'ESP32 ricalcola e applica all'istante lo stato luminoso previsto per quell'esatto minuto della giornata.
+
+---
+
+## 4. Pipeline Telemetria: Firebase RTDB & Power Query (ETL)
+
+Ad ogni rilevazione (minuti `15` e `45`, o test manuale), l'ESP32 apre una connessione HTTPS sicura (`WiFiClientSecure` con `setInsecure()` e supporto ai redirect HTTP 307 tipici della regione `europe-west1`) ed esegue una chiamata `PUT` verso:
+
+```text
+[https://terrario-lazzate-default-rtdb.europe-west1.firebasedatabase.app/telemetria/](https://terrario-lazzate-default-rtdb.europe-west1.firebasedatabase.app/telemetria/)<timestamp>.json
+```
+
+Se la connessione Wi-Fi o Internet è assente, il pacchetto viene salvato in un buffer circolare in RAM (`offlineBuffer`, fino a 50 record) e inviato automaticamente non appena la connessione torna disponibile.
+
+### Script Power Query (Linguaggio M) per Power BI / Excel
+Per importare i dati storici da Firebase direttamente in **Power BI** o **Excel** (*Recupera Dati -> Da Web -> Editor Avanzato*):
+
+```powerquery
+let
+    // 1. Connessione all'endpoint REST JSON di Firebase RTDB
+    Origine = Json.Document(Web.Contents("[https://terrario-lazzate-default-rtdb.europe-west1.firebasedatabase.app/telemetria.json](https://terrario-lazzate-default-rtdb.europe-west1.firebasedatabase.app/telemetria.json)")),
+    
+    // 2. Conversione del dizionario di record in Tabella
+    TabellaRecord = Record.ToTable(Origine),
+    
+    // 3. Espansione delle colonne telemetriche
+    ColonneEspande = Table.ExpandRecordColumn(TabellaRecord, "Value", 
+        {"timestamp", "volta_t", "volta_ur", "tana_t", "tana_ur"}, 
+        {"timestamp", "volta_t", "volta_ur", "tana_t", "tana_ur"}
+    ),
+    
+    // 4. Rimozione della chiave testuale ridondante
+    ColonneRimosse = Table.RemoveColumns(ColonneEspande, {"Name"}),
+    
+    // 5. Conversione del Timestamp Unix (UTC) nel fuso orario locale
+    AggiuntaDataOraUTC = Table.AddColumn(ColonneRimosse, "DataOra_UTC", each #datetimezone(1970, 1, 1, 0, 0, 0, 0, 0) + #duration(0, 0, 0, [timestamp])),
+    AggiuntaDataOraLocale = Table.AddColumn(AggiuntaDataOraUTC, "DataOra", each DateTimeZone.RemoveZone(DateTimeZone.ToLocal([DataOra_UTC]))),
+    RimuoviColonnaUTC = Table.RemoveColumns(AggiuntaDataOraLocale, {"DataOra_UTC"}),
+    
+    // 6. Tipizzazione forte delle colonne per il Data Model
+    TipoDatiImpostato = Table.TransformColumnTypes(RimuoviColonnaUTC, {
+        {"timestamp", Int64.Type},
+        {"volta_t", type number},
+        {"volta_ur", type number},
+        {"tana_t", type number},
+        {"tana_ur", type number},
+        {"DataOra", type datetime}
+    }),
+    
+    // 7. Ordinamento cronologico
+    Ordinato = Table.Sort(TipoDatiImpostato,{{"timestamp", Order.Ascending}})
+in
+    Ordinato
+```
+
+---
+
+## 5. Guida al Flashing & Troubleshooting OTA
+
+### Parametri Arduino IDE
+* **Scheda:** `ESP32 Dev Module`
+* **Versione Core:** `esp32 by Espressif Systems v2.0.17`
+* **Partition Scheme:** `Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)` (consigliato per avere ampio margine per lo sketch e il doppio slot OTA).
+
+### Risoluzione Problemi Comuni
+1. **`Authenticating...OK` seguito da `[ERROR]: No response from device`:**
+   * **Causa:** Il Firewall di Windows blocca la connessione TCP di ritorno che l'ESP32 tenta di aprire verso il PC (`espota.exe`).
+   * **Soluzione:** Aprire `wf.msc` (*Windows Defender Firewall con sicurezza avanzata*), entrare in **Regole connessioni in entrata**, eliminare eventuali regole di blocco rosse su `espota.exe` / `python.exe` e assicurarsi che il profilo della rete Wi-Fi sia impostato su **Rete Privata**.
+2. **Avviso `Nessun monitor disponibile per il protocollo della porta network`:**
+   * **Causa:** Dopo l'upload OTA (`100% Done...`), l'Arduino IDE tenta di aprire il Monitor Seriale sull'indirizzo IP `192.168.1.210`.
+   * **Soluzione:** Non è un errore di caricamento. Tenere chiusa la scheda del Monitor Seriale quando è selezionata la porta di rete per evitare che l'IDE continui a inviare richieste TCP a vuoto verso l'ESP32.
+
+---
+
+## 6. Codice Sorgente Completo (`TerrarioController.ino`)
+
+```cpp
 /**
  * @file TerrarioController.ino
  * @brief Centralina Terrario Bioattivo Definitiva (ESP32 Core 2.0.17)
- * Pinout: 
- *   - Striscia LED SK6812 RGBW: GPIO 4 (D4)
- *   - I2C Volta (Bus 0): SDA GPIO 21 (D21) | SCL GPIO 22 (D22)
- *   - I2C Tana  (Bus 1): SDA GPIO 18 (D18) | SCL GPIO 19 (D19)
+ * 
+ * Pinout Hardware:
+ *   - Striscia LED SK6812 RGBW (36 LED): GPIO 4 (D4)
+ *   - BME280 Volta (Bus I2C 0): SDA = GPIO 21 (D21) | SCL = GPIO 22 (D22)
+ *   - BME280 Tana  (Bus I2C 1): SDA = GPIO 18 (D18) | SCL = GPIO 19 (D19)
  */
 
 #include <WiFi.h>
@@ -21,8 +167,8 @@
 #include <math.h>
 
 // ================= CONFIGURAZIONE RETE =================
-const char* ssid = "nome rete";
-const char* password = "password";
+const char* ssid = "IB24";
+const char* password = "fuzzylotus067";
 
 IPAddress local_IP(192, 168, 1, 210);
 IPAddress gateway(192, 168, 1, 1);
@@ -31,8 +177,8 @@ IPAddress primaryDNS(8, 8, 8, 8);
 IPAddress secondaryDNS(1, 1, 1, 1);
 
 // ================= FIREBASE RTDB =================
-const char* FIREBASE_HOST = "https://terrario-lazzate-default-rtdb.europe-west1.firebasedatabase.app";
-const char* FIREBASE_SECRET = ""; // Lascia vuoto se le regole sono pubbliche (.write: true)
+const char* FIREBASE_HOST = "[https://terrario-lazzate-default-rtdb.europe-west1.firebasedatabase.app](https://terrario-lazzate-default-rtdb.europe-west1.firebasedatabase.app)";
+const char* FIREBASE_SECRET = ""; // Lasciare vuoto se le regole RTDB sono pubbliche (.write: true)
 
 #define MAX_OFFLINE_READINGS 50
 struct SensorRecord { time_t ts; float t1; float ur1; float t2; float ur2; };
@@ -371,20 +517,7 @@ const char index_html[] PROGMEM = R"rawliteral(
   function updateGradSwatches() { document.getElementById('gradSwatchA').style.background = rgbwToCss(...gradA); document.getElementById('gradSwatchB').style.background = rgbwToCss(...gradB); }
   function applyGradient() {
     markManualModeUI();
-    for (let i=0; i<NUM_LEDS; i++) {
-      let t = i / (NUM_LEDS - 1);
-      for (let c=0; c<4; c++) leds[i][c] = Math.round(gradA[c]*(1-t) + gradB[c]*t);
-    }
-    renderStripUI(); scheduleBulkSync(true);
-  }
-
-  function fillAll() { markManualModeUI(); for (let i=0; i<NUM_LEDS; i++) leds[i] = [...curColor]; renderStripUI(); scheduleBulkSync(true); }
-  function clearAll() { markManualModeUI(); for (let i=0; i<NUM_LEDS; i++) leds[i] = [0, 0, 0, 0]; renderStripUI(); scheduleBulkSync(true); }
-  function mirrorStrip() { markManualModeUI(); for (let i=0; i<18; i++) leds[35-i] = [...leds[i]]; renderStripUI(); scheduleBulkSync(true); }
-
-  function scheduleBulkSync(immediate = false) {
-    clearTimeout(syncTimeout);
-    const sendFn = () => { fetch('/api/bulk?d=' + leds.map(c => c.map(v => v.toString(16).padStart(2,'0')).join('')).join('')).catch(()=>{}); };
+    for (let i=0; i<NUM_LEDS; (NUM_LEDS (let + - / 0, 0]; 1); c="0;" c++) c<4; clearAll() clearTimeout(syncTimeout); const fillAll() for function gradB[c]*t); i="0;" i++) i<18; i<NUM_LEDS; leds[35-i]="[...leds[i]];" leds[i]="[0," leds[i][c]="Math.round(gradA[c]*(1-t)" let markManualModeUI(); mirrorStrip() renderStripUI(); scheduleBulkSync(immediate="false)" scheduleBulkSync(true); sendFn="()" t="i" { }> { fetch('/api/bulk?d=' + leds.map(c => c.map(v => v.toString(16).padStart(2,'0')).join('')).join('')).catch(()=>{}); };
     if (immediate) sendFn();
     else syncTimeout = setTimeout(sendFn, 50);
   }
@@ -398,7 +531,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 
   // ATTIVAZIONE ISTANTANEA CICLO NATURALE
   function activateAuto() {
-    clearTimeout(syncTimeout); // Cancella qualsiasi pacchetto manuale pendente
+    clearTimeout(syncTimeout);
     markAutoModeUI();
     const browserTs = Math.floor(Date.now() / 1000);
     fetch(`/api/auto?val=1&ts=${browserTs}`)
@@ -786,7 +919,7 @@ void setup() {
       if (autoMode) {
         animMode = 0;
         forceCircadianUpdate = true;
-        runCircadianStep(); // Aggiorna immediatamente ledBuffer e forza il refresh fisico!
+        runCircadianStep();
       }
     }
     request->send(200, "application/json", buildStateJson());
@@ -913,3 +1046,4 @@ void loop() {
 
   delay(2);
 }
+```
