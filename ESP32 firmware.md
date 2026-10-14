@@ -2,6 +2,8 @@
 
 Documentazione ingegneristica, architettura hardware/software, pipeline dati BI e codice sorgente completo per la centralina basata su **ESP32** dedicata alla gestione del terrario bioattivo (*Lazzate, MB*).
 
+Nota: sono state fatte piccole modifiche al codice. Questo documento, pur valido, è leggermente obsoleto. La modifica più importante, l'indirizzo IP è fissato tramite DCHP e non più dal codice.
+
 ---
 
 ## Indice
@@ -141,16 +143,13 @@ in
 ---
 
 ## 6. Codice Sorgente Completo (`TerrarioController.ino`)
-
-```cpp
 /**
  * @file TerrarioController.ino
  * @brief Centralina Terrario Bioattivo Definitiva (ESP32 Core 2.0.17)
- * 
- * Pinout Hardware:
- *   - Striscia LED SK6812 RGBW (36 LED): GPIO 4 (D4)
- *   - BME280 Volta (Bus I2C 0): SDA = GPIO 21 (D21) | SCL = GPIO 22 (D22)
- *   - BME280 Tana  (Bus I2C 1): SDA = GPIO 18 (D18) | SCL = GPIO 19 (D19)
+ * Pinout: 
+ *   - Striscia LED SK6812 RGBW: GPIO 4 (D4)
+ *   - I2C Volta (Bus 0): SDA GPIO 21 (D21) | SCL GPIO 22 (D22)
+ *   - I2C Tana  (Bus 1): SDA GPIO 18 (D18) | SCL GPIO 19 (D19)
  */
 
 #include <WiFi.h>
@@ -165,6 +164,7 @@ in
 #include <time.h>
 #include <sys/time.h>
 #include <math.h>
+#include "lwip/dns.h"
 
 // ================= CONFIGURAZIONE RETE =================
 const char* ssid = "IB24";
@@ -177,8 +177,8 @@ IPAddress primaryDNS(8, 8, 8, 8);
 IPAddress secondaryDNS(1, 1, 1, 1);
 
 // ================= FIREBASE RTDB =================
-const char* FIREBASE_HOST = "[https://terrario-lazzate-default-rtdb.europe-west1.firebasedatabase.app](https://terrario-lazzate-default-rtdb.europe-west1.firebasedatabase.app)";
-const char* FIREBASE_SECRET = ""; // Lasciare vuoto se le regole RTDB sono pubbliche (.write: true)
+const char* FIREBASE_HOST = "terrario-bioattivo-default-rtdb.europe-west1.firebasedatabase.app";
+const char* FIREBASE_SECRET = ""; // Lascia vuoto se le regole sono pubbliche (.write: true)
 
 #define MAX_OFFLINE_READINGS 50
 struct SensorRecord { time_t ts; float t1; float ur1; float t2; float ur2; };
@@ -216,8 +216,11 @@ uint8_t currentSolarPhase = 0; // 0=Notte, 1=Alba, 2=Giorno, 3=Tramonto
 
 // ================= TRIGGER TEST MANUALE SENSORI =================
 volatile bool manualReadRequested = false;
+volatile bool isReadingInProgress = false;
 bool lastManualSendSuccess = false;
-int lastFirebaseHttpCode = 0;
+int lastFirebaseHttpCode = -99; // -99 = Mai eseguito
+String lastFirebaseErrorStr = "In attesa";
+String lastResolvedIP = "N/A";
 
 // ================= SENSORI BME280 (DUE BUS I2C) =================
 #define SDA_1 21
@@ -426,6 +429,7 @@ const char index_html[] PROGMEM = R"rawliteral(
   let animMode = 0; let animDir = 1;
   let autoMode = true;
   let syncTimeout = null;
+  let stateInterval = null;
 
   const quickColors = [
     [255,0,0,0], [255,90,0,0], [255,200,0,0], [0,255,0,0], [0,255,140,0], [0,180,255,0],
@@ -462,6 +466,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     updateColorUI();
     updateGradSwatches();
     fetchCurrentState();
+    stateInterval = setInterval(fetchCurrentState, 30000);
   }
 
   function handleTouch(e) {
@@ -517,7 +522,20 @@ const char index_html[] PROGMEM = R"rawliteral(
   function updateGradSwatches() { document.getElementById('gradSwatchA').style.background = rgbwToCss(...gradA); document.getElementById('gradSwatchB').style.background = rgbwToCss(...gradB); }
   function applyGradient() {
     markManualModeUI();
-    for (let i=0; i<NUM_LEDS; (NUM_LEDS (let + - / 0, 0]; 1); c="0;" c++) c<4; clearAll() clearTimeout(syncTimeout); const fillAll() for function gradB[c]*t); i="0;" i++) i<18; i<NUM_LEDS; leds[35-i]="[...leds[i]];" leds[i]="[0," leds[i][c]="Math.round(gradA[c]*(1-t)" let markManualModeUI(); mirrorStrip() renderStripUI(); scheduleBulkSync(immediate="false)" scheduleBulkSync(true); sendFn="()" t="i" { }> { fetch('/api/bulk?d=' + leds.map(c => c.map(v => v.toString(16).padStart(2,'0')).join('')).join('')).catch(()=>{}); };
+    for (let i=0; i<NUM_LEDS; i++) {
+      let t = i / (NUM_LEDS - 1);
+      for (let c=0; c<4; c++) leds[i][c] = Math.round(gradA[c]*(1-t) + gradB[c]*t);
+    }
+    renderStripUI(); scheduleBulkSync(true);
+  }
+
+  function fillAll() { markManualModeUI(); for (let i=0; i<NUM_LEDS; i++) leds[i] = [...curColor]; renderStripUI(); scheduleBulkSync(true); }
+  function clearAll() { markManualModeUI(); for (let i=0; i<NUM_LEDS; i++) leds[i] = [0, 0, 0, 0]; renderStripUI(); scheduleBulkSync(true); }
+  function mirrorStrip() { markManualModeUI(); for (let i=0; i<18; i++) leds[35-i] = [...leds[i]]; renderStripUI(); scheduleBulkSync(true); }
+
+  function scheduleBulkSync(immediate = false) {
+    clearTimeout(syncTimeout);
+    const sendFn = () => { fetch('/api/bulk?d=' + leds.map(c => c.map(v => v.toString(16).padStart(2,'0')).join('')).join('')).catch(()=>{}); };
     if (immediate) sendFn();
     else syncTimeout = setTimeout(sendFn, 50);
   }
@@ -529,7 +547,6 @@ const char index_html[] PROGMEM = R"rawliteral(
   function onAnimParamChange() { markManualModeUI(); document.getElementById('valSpeed').innerText = document.getElementById('slSpeed').value; document.getElementById('valInt').innerText = document.getElementById('slInt').value; sendAnimParams(); }
   function sendAnimParams() { fetch(`/api/anim?mode=${animMode}&speed=${document.getElementById('slSpeed').value}&int=${document.getElementById('slInt').value}&dir=${animDir}`).catch(()=>{}); }
 
-  // ATTIVAZIONE ISTANTANEA CICLO NATURALE
   function activateAuto() {
     clearTimeout(syncTimeout);
     markAutoModeUI();
@@ -566,35 +583,44 @@ const char index_html[] PROGMEM = R"rawliteral(
     document.getElementById('dir-1').classList.toggle('active', d===-1);
   }
 
-  // TEST SENSORI MANUALE
+  // TEST SENSORI MANUALE CON SILENZIO RADIO DURANTE HANDSHAKE SSL
   function triggerSensorTest() {
     const btn = document.getElementById('btnTestSensors');
     const resBox = document.getElementById('testSensorResult');
     btn.disabled = true;
-    btn.innerText = "⏳ Rilevazione e invio in corso...";
+    btn.innerText = "⏳ Invio SSL in corso (attendere ~4s)...";
     resBox.style.display = "block";
     resBox.style.color = "#94a3b8";
-    resBox.innerText = "Lettura sensori I2C e connessione HTTPS a Firebase...";
+    resBox.innerText = "Connessione TLS a Firebase in corso (nessuna richiesta web durante l'handshake)...";
 
     const browserTs = Math.floor(Date.now() / 1000);
     fetch(`/api/trigger_read?ts=${browserTs}`)
       .then(() => {
-        setTimeout(() => {
-          fetch('/api/sensor_status')
-            .then(r => r.json())
-            .then(data => {
-              btn.disabled = false;
-              btn.innerText = "🧪 Esegui Lettura Immediata & Invia a Firebase";
-              if (data.success) {
-                resBox.style.color = "#34d399";
-                resBox.innerHTML = `✅ <b>Inviato a Firebase (HTTP ${data.httpCode})!</b><br>Volta: <b>${data.t1.toFixed(1)}°C</b> / <b>${data.ur1.toFixed(1)}%</b> &nbsp;|&nbsp; Tana: <b>${data.t2.toFixed(1)}°C</b> / <b>${data.ur2.toFixed(1)}%</b>`;
-              } else {
-                resBox.style.color = "#f87171";
-                resBox.innerHTML = `⚠️ <b>Errore Firebase (HTTP ${data.httpCode} — salvato nel buffer)</b><br>Volta: <b>${data.t1.toFixed(1)}°C</b> / <b>${data.ur1.toFixed(1)}%</b> &nbsp;|&nbsp; Tana: <b>${data.t2.toFixed(1)}°C</b> / <b>${data.ur2.toFixed(1)}%</b>`;
-              }
-            })
-            .catch(() => { btn.disabled = false; btn.innerText = "🧪 Esegui Lettura Immediata & Invia a Firebase"; });
-        }, 1600);
+        // Aspettiamo 4.5 secondi senza disturbare l'ESP32 con richieste HTTP mentre fa l'handshake SSL!
+        setTimeout(checkSensorStatus, 4500);
+      })
+      .catch(() => { btn.disabled = false; btn.innerText = "🧪 Esegui Lettura Immediata & Invia a Firebase"; });
+  }
+
+  function checkSensorStatus() {
+    const btn = document.getElementById('btnTestSensors');
+    const resBox = document.getElementById('testSensorResult');
+    fetch('/api/sensor_status')
+      .then(r => r.json())
+      .then(data => {
+        if (data.pending === 1) {
+          setTimeout(checkSensorStatus, 1200);
+          return;
+        }
+        btn.disabled = false;
+        btn.innerText = "🧪 Esegui Lettura Immediata & Invia a Firebase";
+        if (data.success) {
+          resBox.style.color = "#34d399";
+          resBox.innerHTML = `✅ <b>Inviato a Firebase (HTTP ${data.httpCode})!</b><br>Volta: <b>${data.t1.toFixed(1)}°C</b> / <b>${data.ur1.toFixed(1)}%</b> &nbsp;|&nbsp; Tana: <b>${data.t2.toFixed(1)}°C</b> / <b>${data.ur2.toFixed(1)}%</b><br><small style="color:#94a3b8">IP Firebase: ${data.fbIP} | RAM Libera: ${data.heap} B</small>`;
+        } else {
+          resBox.style.color = "#f87171";
+          resBox.innerHTML = `⚠️ <b>Errore Firebase (HTTP ${data.httpCode}: ${data.err})</b><br>Volta: <b>${data.t1.toFixed(1)}°C</b> / <b>${data.ur1.toFixed(1)}%</b> &nbsp;|&nbsp; Tana: <b>${data.t2.toFixed(1)}°C</b> / <b>${data.ur2.toFixed(1)}%</b><br><small style="color:#cbd5e1">DNS: ${data.dns} | IP Firebase: ${data.fbIP} | Heap: ${data.heap} B</small>`;
+        }
       })
       .catch(() => { btn.disabled = false; btn.innerText = "🧪 Esegui Lettura Immediata & Invia a Firebase"; });
   }
@@ -634,7 +660,6 @@ const char index_html[] PROGMEM = R"rawliteral(
   }
 
   window.onload = initUI;
-  setInterval(fetchCurrentState, 30000);
 </script>
 </body>
 </html>
@@ -726,16 +751,14 @@ void applyAutoCircadian(int cur, int sr, int ss) {
   float t;
   uint8_t R = 0, G = 0, B = 0, W = 0;
   
-  uint8_t day[4]   = {100, 120, 80, 255}; // Luce bianca naturale diurna
-  uint8_t dawn[4]  = {255, 60, 0, 10};    // Luce ambrata alba/tramonto
+  uint8_t day[4]  = {100, 120, 80, 255};
+  uint8_t dawn[4] = {255, 60, 0, 10};
 
   if (cur < sr - 30 || cur >= ss + 30) {
-    // NOTTE: Luci spente
     R = 0; G = 0; B = 0; W = 0;
     currentSolarPhase = 0;
   }
   else if (cur >= sr - 30 && cur < sr + 30) {
-    // ALBA: da -30m a +30m
     currentSolarPhase = 1;
     t = (cur - (sr - 30)) / 60.0f;
     if (t < 0.5f) {
@@ -750,12 +773,10 @@ void applyAutoCircadian(int cur, int sr, int ss) {
     }
   }
   else if (cur >= sr + 30 && cur < ss - 30) {
-    // GIORNO: Luce bianca piena
     currentSolarPhase = 2;
     R = day[0]; G = day[1]; B = day[2]; W = day[3];
   }
   else if (cur >= ss - 30 && cur < ss + 30) {
-    // TRAMONTO: da -30m a +30m
     currentSolarPhase = 3;
     t = (cur - (ss - 30)) / 60.0f;
     if (t < 0.5f) {
@@ -773,14 +794,13 @@ void applyAutoCircadian(int cur, int sr, int ss) {
     }
   }
 
-  animMode = 0; // Disattiva qualsiasi movimento manuale
+  animMode = 0;
   for (int i = 0; i < NUM_LEDS; i++) {
      ledBuffer[i][0] = R; ledBuffer[i][1] = G; ledBuffer[i][2] = B; ledBuffer[i][3] = W;
   }
   ledsNeedUpdate = true;
 }
 
-// Esegue immediatamente il calcolo solare ed eventuale applicazione ai LED
 void runCircadianStep() {
   time_t ts = time(nullptr);
   if (ts > 1000000000) {
@@ -794,7 +814,6 @@ void runCircadianStep() {
   }
 }
 
-// Sincronizza l'orologio interno dal browser se l'NTP non ha ancora risposto
 void syncClockFromBrowserIfNeeded(AsyncWebServerRequest *request) {
   if (request->hasParam("ts")) {
     time_t now = time(nullptr);
@@ -837,31 +856,72 @@ void readSensors() {
   if (bme2_ok) { s2.t = bme2.readTemperature(); s2.ur = bme2.readHumidity(); }
 }
 
+void forceDnsServers() {
+  ip_addr_t d1, d2;
+  IP_ADDR4(&d1, 8, 8, 8, 8);
+  IP_ADDR4(&d2, 1, 1, 1, 1);
+  dns_setserver(0, &d1);
+  dns_setserver(1, &d2);
+}
+
 bool sendToFirebase(time_t ts, float t1, float ur1, float t2, float ur2) {
   if (WiFi.status() != WL_CONNECTED) {
-    lastFirebaseHttpCode = -1;
+    lastFirebaseHttpCode = -10;
+    lastFirebaseErrorStr = "WiFi Disconnesso";
     return false;
   }
 
+  // Forza DNS LwIP nel caso WiFi.config li avesse persi
+  forceDnsServers();
+
+  // Test risoluzione DNS prima di aprire il socket SSL
+  IPAddress resolved;
+  if (!WiFi.hostByName(FIREBASE_HOST, resolved)) {
+    lastResolvedIP = "DNS_FAIL";
+    lastFirebaseHttpCode = -11;
+    lastFirebaseErrorStr = "Errore DNS (Router non raggiunge Internet)";
+    return false;
+  }
+  lastResolvedIP = resolved.toString();
+
+  if (ts < 1000000000) ts = millis() / 1000;
+
   WiFiClientSecure client;
-  client.setInsecure(); // Indispensabile per HTTPS su ESP32 senza certificato CA
+  client.setInsecure();
+  client.setTimeout(12);
 
   HTTPClient http;
-  String host = String(FIREBASE_HOST);
-  if (host.endsWith("/")) host.remove(host.length() - 1);
+  http.setConnectTimeout(10000);
+  http.setTimeout(10000);
 
-  String url = host + "/telemetria/" + String(ts) + ".json";
+  String path = "/telemetria/" + String((unsigned long)ts) + ".json";
   if (String(FIREBASE_SECRET).length() > 0) {
-    url += "?auth=" + String(FIREBASE_SECRET);
+    path += "?auth=" + String(FIREBASE_SECRET);
   }
 
-  http.begin(client, url);
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  if (!http.begin(client, FIREBASE_HOST, 443, path, true)) {
+    lastFirebaseHttpCode = -12;
+    lastFirebaseErrorStr = "Init HTTPS Fallito";
+    return false;
+  }
+
   http.addHeader("Content-Type", "application/json");
 
-  String payload = "{\"timestamp\":" + String(ts) + ",\"volta_t\":" + String(t1,2) + ",\"volta_ur\":" + String(ur1,2) + ",\"tana_t\":" + String(t2,2) + ",\"tana_ur\":" + String(ur2,2) + "}";
-  
+  String payload = "{\"timestamp\":" + String((unsigned long)ts) +
+                   ",\"volta_t\":" + String(t1, 2) +
+                   ",\"volta_ur\":" + String(ur1, 2) +
+                   ",\"tana_t\":" + String(t2, 2) +
+                   ",\"tana_ur\":" + String(ur2, 2) + "}";
+
   lastFirebaseHttpCode = http.PUT(payload);
+  if (lastFirebaseHttpCode <= 0) {
+    lastFirebaseErrorStr = http.errorToString(lastFirebaseHttpCode);
+  } else if (lastFirebaseHttpCode == 401 || lastFirebaseHttpCode == 403) {
+    lastFirebaseErrorStr = "Permesso Negato (Controlla Regole Firebase .write: true)";
+  } else {
+    lastFirebaseErrorStr = "OK";
+  }
+  
   http.end();
   return (lastFirebaseHttpCode == 200 || lastFirebaseHttpCode == 201);
 }
@@ -870,33 +930,35 @@ bool sendToFirebase(time_t ts, float t1, float ur1, float t2, float ur2) {
 void setup() {
   Serial.begin(115200); delay(500);
 
-  // Inizializzazione Striscia LED
   strip.begin(); strip.setBrightness(255);
   for (int i = 0; i < NUM_LEDS; i++) { ledBuffer[i][0]=0; ledBuffer[i][1]=0; ledBuffer[i][2]=0; ledBuffer[i][3]=0; }
   ledsNeedUpdate = true; updateLedEngine();
 
-  // Inizializzazione I2C Indipendenti
-  I2Cone.begin(SDA_1, SCL_1); // D21, D22
-  I2Ctwo.begin(SDA_2, SCL_2); // D18, D19
+  I2Cone.begin(SDA_1, SCL_1);
+  I2Ctwo.begin(SDA_2, SCL_2);
   bme1_ok = bme1.begin(0x76, &I2Cone) || bme1.begin(0x77, &I2Cone);
   bme2_ok = bme2.begin(0x76, &I2Ctwo) || bme2.begin(0x77, &I2Ctwo);
 
-  // Connessione Wi-Fi con doppio DNS
   WiFi.mode(WIFI_STA);
-  WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) delay(500);
+  
+  WiFi.setSleep(false);
+  forceDnsServers();
 
-  // Configurazione Orologio UTC + Timezone Italiana (CET/CEST)
   configTime(0, 0, "pool.ntp.org", "time.google.com", "time.nist.gov");
   setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
   tzset();
 
-  // OTA con protezione interrupt LED
   ArduinoOTA.setHostname("Terrario-Lazzate");
-  ArduinoOTA.onStart([]() { isOtaUpdating = true; });
+  ArduinoOTA.onStart([]() {
+    isOtaUpdating = true;
+    server.end();
+    strip.clear();
+    strip.show();
+  });
   ArduinoOTA.onEnd([]() { isOtaUpdating = false; });
-  ArduinoOTA.onError([](ota_error_t error) { isOtaUpdating = false; });
+  ArduinoOTA.onError([](ota_error_t error) { isOtaUpdating = false; ESP.restart(); });
   ArduinoOTA.begin();
 
   readSensors();
@@ -927,14 +989,21 @@ void setup() {
 
   server.on("/api/trigger_read", HTTP_GET, [](AsyncWebServerRequest *request){
     syncClockFromBrowserIfNeeded(request);
+    lastFirebaseHttpCode = -99; // Reset stato
+    isReadingInProgress = true;
     manualReadRequested = true;
     request->send(200, "text/plain", "OK");
   });
 
   server.on("/api/sensor_status", HTTP_GET, [](AsyncWebServerRequest *request){
     String json = "{";
+    json += "\"pending\":" + String(isReadingInProgress ? 1 : 0) + ",";
     json += "\"success\":" + String(lastManualSendSuccess ? 1 : 0) + ",";
     json += "\"httpCode\":" + String(lastFirebaseHttpCode) + ",";
+    json += "\"err\":\"" + lastFirebaseErrorStr + "\",";
+    json += "\"dns\":\"" + WiFi.dnsIP(0).toString() + "\",";
+    json += "\"fbIP\":\"" + lastResolvedIP + "\",";
+    json += "\"heap\":" + String(ESP.getFreeHeap()) + ",";
     json += "\"t1\":" + String(s1.t, 2) + ",";
     json += "\"ur1\":" + String(s1.ur, 2) + ",";
     json += "\"t2\":" + String(s2.t, 2) + ",";
@@ -981,7 +1050,7 @@ void loop() {
   ArduinoOTA.handle();
 
   if (isOtaUpdating) {
-    delay(1);
+    delay(5);
     return;
   }
 
@@ -998,6 +1067,7 @@ void loop() {
     readSensors();
     time_t nowTs = time(nullptr);
     lastManualSendSuccess = sendToFirebase(nowTs, s1.t, s1.ur, s2.t, s2.ur);
+    isReadingInProgress = false;
     if (!lastManualSendSuccess) {
       if (offlineCount < MAX_OFFLINE_READINGS) {
         offlineBuffer[offlineCount] = {nowTs, s1.t, s1.ur, s2.t, s2.ur};
@@ -1014,7 +1084,6 @@ void loop() {
     int absMinute = timeinfo.tm_hour * 60 + currentMinute;
     currentNowMin = absMinute;
 
-    // Aggiornamento Ciclo Solare ogni minuto o su richiesta immediata
     if (autoMode && (absMinute != lastCircadianMin || forceCircadianUpdate)) {
       lastCircadianMin = absMinute;
       forceCircadianUpdate = false;
@@ -1022,7 +1091,6 @@ void loop() {
       applyAutoCircadian(absMinute, currentSrMin, currentSsMin);
     }
 
-    // Invio programmato ai minuti 15 e 45
     if ((currentMinute == 15 || currentMinute == 45) && currentMinute != lastUploadedMinute) {
       lastUploadedMinute = currentMinute;
       readSensors();
@@ -1046,4 +1114,3 @@ void loop() {
 
   delay(2);
 }
-```
