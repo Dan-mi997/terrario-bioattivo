@@ -17,9 +17,9 @@ const LONGITUDE = 9.0833;
 // Alba: 60 min centrati (-30 min / +30 min)
 // Tramonto: 60 min (-45 min / +15 min)
 const DAWN_START_OFFSET = -30;
-const DAWN_END_OFFSET   = +30;
-const DUSK_START_OFFSET = -45;
-const DUSK_END_OFFSET   = +15;
+const DAWN_END_OFFSET   = +0;
+const DUSK_START_OFFSET = -0;
+const DUSK_END_OFFSET   = +30;
 
 function calculateCircadianPhaseLazzate() {
   const phaseEl = document.getElementById("phase-status");
