@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Telemetria Live — Terrario Bioattivo</title>
+  <!-- Chart.js per i grafici interattivi -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --card: #151c24;
+      --border: #243040;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --accent: #10b981;
+      --volta-color: #f59e0b; /* Ambra per la Volta */
+      --tana-color: #38bdf8;  /* Ciano per la Tana */
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      line-height: 1.6;
+      padding: 20px;
+    }
+    .container { max-width: 1100px; margin: 0 auto; }
+    
+    /* Header & Nav */
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 15px;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .title-group h1 { font-size: 1.6rem; color: #fff; }
+    .title-group p { font-size: 0.9rem; color: var(--muted); }
+    .back-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 600;
+      border: 1px solid var(--accent);
+      padding: 8px 14px;
+      border-radius: 8px;
+      transition: 0.2s;
+    }
+    .back-link:hover { background: rgba(16, 185, 129, 0.15); }
+
+    /* KPI Grid */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .kpi-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      position: relative;
+      overflow: hidden;
+    }
+    .kpi-card::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; width: 4px; height: 100%;
+    }
+    .kpi-volta::before { background: var(--volta-color); }
+    .kpi-tana::before { background: var(--tana-color); }
+    .kpi-delta::before { background: var(--accent); }
+    
+    .kpi-label { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); }
+    .kpi-value { font-size: 1.8rem; font-weight: 700; margin: 6px 0 2px 0; }
+    .kpi-sub { font-size: 0.82rem; color: var(--muted); }
+
+    /* Toolbar Filtri */
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      background: var(--card);
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+    }
+    .filter-group { display: flex; gap: 8px; flex-wrap: wrap; }
+    .btn {
+      background: #1e293b;
+      color: var(--text);
+      border: 1px solid #334155;
+      padding: 7px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      transition: 0.15s;
+    }
+    .btn:hover { border-color: var(--muted); }
+    .btn.active {
+      background: rgba(16, 185, 129, 0.2);
+      border-color: var(--accent);
+      color: #34d399;
+    }
+    .status-badge { font-size: 0.85rem; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); display: inline-block; }
+
+    /* Grafici */
+    .chart-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    .chart-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .chart-title { font-size: 1rem; font-weight: 600; color: var(--text); }
+    .chart-container { position: relative; height: 340px; width: 100%; }
+    @media (max-width: 600px) { .chart-container { height: 260px; } }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <div class="title-group">
+      <h1>🦂 Telemetria Microclimatica</h1>
+      <p>Monitoraggio dual-zone (Volta vs Tana) — <i>Euscorpius italicus</i></p>
+    </div>
+    <a href="index.html" class="back-link">← Torna al Progetto</a>
+  </header>
+
+  <!-- KPI in Tempo Reale -->
+  <div class="kpi-grid">
+    <div class="kpi-card kpi-volta">
+      <div class="kpi-label">☀️ Zona Superficiale (Volta)</div>
+      <div class="kpi-value" id="kpiVoltaT">--.- °C</div>
+      <div class="kpi-sub">Umidità Relativa: <strong id="kpiVoltaUR" style="color:#fff">--.- %</strong></div>
+    </div>
+    <div class="kpi-card kpi-tana">
+      <div class="kpi-label">🪨 Rifugio Ipogeo (Tana)</div>
+      <div class="kpi-value" id="kpiTanaT">--.- °C</div>
+      <div class="kpi-sub">Umidità Relativa: <strong id="kpiTanaUR" style="color:#fff">--.- %</strong></div>
+    </div>
+    <div class="kpi-card kpi-delta">
+      <div class="kpi-label">⚖️ Gradiente (Tana vs Volta)</div>
+      <div class="kpi-value" id="kpiDeltaT">--.- °C</div>
+      <div class="kpi-sub">Scarto Umidità: <strong id="kpiDeltaUR" style="color:#fff">--.- %</strong></div>
+    </div>
+  </div>
+
+  <!-- Barra Controlli e Filtri -->
+  <div class="toolbar">
+    <div class="filter-group">
+      <button class="btn active" onclick="setRange(24, this)">24 Ore</button>
+      <button class="btn" onclick="setRange(168, this)">7 Giorni</button>
+      <button class="btn" onclick="setRange(720, this)">30 Giorni</button>
+      <button class="btn" onclick="setRange(0, this)">Tutto lo Storico</button>
+    </div>
+    <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+      <span class="status-badge"><span class="dot" id="statusDot"></span> <span id="lastUpdateLbl">Caricamento dati...</span></span>
+      <button class="btn" onclick="exportCSV()">📥 Scarica CSV</button>
+    </div>
+  </div>
+
+  <!-- Grafico Temperature -->
+  <div class="chart-card">
+    <div class="chart-header">
+      <span class="chart-title">🌡️ Andamento Temperature (°C)</span>
+    </div>
+    <div class="chart-container">
+      <canvas id="tempChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Grafico Umidità -->
+  <div class="chart-card">
+    <div class="chart-header">
+      <span class="chart-title">💧 Andamento Umidità Relativa (%)</span>
+    </div>
+    <div class="chart-container">
+      <canvas id="humChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<script>
+  const FIREBASE_URL = "https://terrario-bioattivo-default-rtdb.europe-west1.firebasedatabase.app/telemetria.json";
+  
+  let allRecords = [];
+  let currentRangeHours = 24;
+  let tempChartInstance = null;
+  let humChartInstance = null;
+
+  async function fetchTelemetry() {
+    try {
+      const response = await fetch(FIREBASE_URL);
+      const data = await response.json();
+      
+      if (!data) {
+        document.getElementById('lastUpdateLbl').innerText = "Nessun dato presente su Firebase";
+        return;
+      }
+
+      // Converte l'oggetto JSON di Firebase in un array ordinato per timestamp
+      allRecords = Object.values(data)
+        .filter(r => r && r.timestamp && r.timestamp > 1700000000) // Filtra eventuali letture senza NTP valido
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+      if (allRecords.length > 0) {
+        updateKPIs(allRecords[allRecords.length - 1]);
+        renderCharts();
+      }
+    } catch (err) {
+      console.error("Errore lettura Firebase:", err);
+      document.getElementById('lastUpdateLbl').innerText = "Errore di connessione al database";
+      document.getElementById('statusDot').style.background = "#ef4444";
+    }
+  }
+
+  function updateKPIs(latest) {
+    document.getElementById('kpiVoltaT').innerText = `${latest.volta_t.toFixed(1)} °C`;
+    document.getElementById('kpiVoltaUR').innerText = `${latest.volta_ur.toFixed(1)} %`;
+    document.getElementById('kpiTanaT').innerText = `${latest.tana_t.toFixed(1)} °C`;
+    document.getElementById('kpiTanaUR').innerText = `${latest.tana_ur.toFixed(1)} %`;
+
+    const dT = latest.tana_t - latest.volta_t;
+    const dUR = latest.tana_ur - latest.volta_ur;
+    document.getElementById('kpiDeltaT').innerText = `${dT >= 0 ? '+' : ''}${dT.toFixed(1)} °C`;
+    document.getElementById('kpiDeltaUR').innerText = `${dUR >= 0 ? '+' : ''}${dUR.toFixed(1)} %`;
+
+    const dateObj = new Date(latest.timestamp * 1000);
+    const dateStr = dateObj.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    document.getElementById('lastUpdateLbl').innerText = `Ultimo invio: ${dateStr} (${allRecords.length} letture)`;
+  }
+
+  function setRange(hours, btnEl) {
+    currentRangeHours = hours;
+    document.querySelectorAll('.filter-group .btn').forEach(b => b.classList.remove('active'));
+    btnEl.classList.add('active');
+    renderCharts();
+  }
+
+  function renderCharts() {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const filtered = currentRangeHours === 0 
+      ? allRecords 
+      : allRecords.filter(r => r.timestamp >= (nowSec - currentRangeHours * 3600));
+
+    const labels = filtered.map(r => {
+      const d = new Date(r.timestamp * 1000);
+      return currentRangeHours <= 24 
+        ? d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+        : d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    });
+
+    const voltaT = filtered.map(r => r.volta_t);
+    const tanaT  = filtered.map(r => r.tana_t);
+    const voltaUR = filtered.map(r => r.volta_ur);
+    const tanaUR  = filtered.map(r => r.tana_ur);
+
+    const commonOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#f1f5f9', font: { size: 12 } } },
+        tooltip: { backgroundColor: '#0b0f14', borderColor: '#334155', borderWidth: 1 }
+      },
+      scales: {
+        x: { ticks: { color: '#94a3b8', maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+        y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.07)' } }
+      }
+    };
+
+    // 1. Grafico Temperature
+    if (tempChartInstance) tempChartInstance.destroy();
+    tempChartInstance = new Chart(document.getElementById('tempChart'), {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'Volta (°C)',
+            data: voltaT,
+            borderColor: '#f59e0b',
+            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+            borderWidth: 2,
+            pointRadius: 2,
+            tension: 0.3,
+            fill: true
+          },
+          {
+            label: 'Tana (°C)',
+            data: tanaT,
+            borderColor: '#38bdf8',
+            backgroundColor: 'rgba(56, 189, 248, 0.1)',
+            borderWidth: 2,
+            pointRadius: 2,
+            tension: 0.3,
+            fill: true
+          }
+        ]
+      },
+      options: commonOptions
+    });
+
+    // 2. Grafico Umidità
+    if (humChartInstance) humChartInstance.destroy();
+    humChartInstance = new Chart(document.getElementById('humChart'), {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'Volta (%)',
+            data: voltaUR,
+            borderColor: '#f59e0b',
+            borderDash: [4, 4],
+            borderWidth: 2,
+            pointRadius: 2,
+            tension: 0.3
+          },
+          {
+            label: 'Tana (%)',
+            data: tanaUR,
+            borderColor: '#38bdf8',
+            backgroundColor: 'rgba(56, 189, 248, 0.12)',
+            borderWidth: 2,
+            pointRadius: 2,
+            tension: 0.3,
+            fill: true
+          }
+        ]
+      },
+      options: commonOptions
+    });
+  }
+
+  // Esportazione CSV per Excel / Python
+  function exportCSV() {
+    if (!allRecords.length) return;
+    let csv = "Timestamp,Data_Ora,Volta_T_C,Volta_UR_Perc,Tana_T_C,Tana_UR_Perc\n";
+    allRecords.forEach(r => {
+      const isoDate = new Date(r.timestamp * 1000).toISOString();
+      csv += `${r.timestamp},${isoDate},${r.volta_t},${r.volta_ur},${r.tana_t},${r.tana_ur}\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `telemetria_terrario_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+  }
+
+  // Avvia al caricamento e aggiorna ogni 5 minuti se la pagina resta aperta
+  window.onload = () => {
+    fetchTelemetry();
+    setInterval(fetchTelemetry, 300000);
+  };
+</script>
+</body>
+</html>
